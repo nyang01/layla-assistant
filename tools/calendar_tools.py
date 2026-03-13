@@ -10,14 +10,17 @@ from auth import get_credentials
 _calendar_service = None
 
 
-def _get_calendar_service():
+def _get_calendar_service(credentials=None):
+    """Build Calendar service. Uses provided credentials (multi-user) or legacy singleton."""
+    if credentials:
+        return build("calendar", "v3", credentials=credentials)
     global _calendar_service
     if _calendar_service is None:
         _calendar_service = build("calendar", "v3", credentials=get_credentials())
     return _calendar_service
 
 
-def read_calendar(date: str | None = None, calendar_id: str = "primary") -> dict:
+def read_calendar(date: str | None = None, calendar_id: str = "primary", credentials=None) -> dict:
     """Read events from Google Calendar for a specific date.
 
     Args:
@@ -27,7 +30,7 @@ def read_calendar(date: str | None = None, calendar_id: str = "primary") -> dict
     Returns:
         dict with status and list of events.
     """
-    service = _get_calendar_service()
+    service = _get_calendar_service(credentials)
 
     local_tz = datetime.now().astimezone().tzinfo
 
@@ -78,6 +81,7 @@ def create_event(
     description: str = "",
     reminder_minutes: int = 10,
     calendar_id: str = "primary",
+    credentials=None,
 ) -> dict:
     """Create a new event on Google Calendar.
 
@@ -93,7 +97,7 @@ def create_event(
     Returns:
         dict with status and created event details.
     """
-    service = _get_calendar_service()
+    service = _get_calendar_service(credentials)
 
     start_dt = datetime.strptime(f"{date} {start_time}", "%Y-%m-%d %H:%M")
 
@@ -137,7 +141,7 @@ def create_event(
     }
 
 
-def delete_event(event_id: str, calendar_id: str = "primary") -> dict:
+def delete_event(event_id: str, calendar_id: str = "primary", credentials=None) -> dict:
     """Delete (cancel) an event from Google Calendar.
 
     Args:
@@ -147,7 +151,7 @@ def delete_event(event_id: str, calendar_id: str = "primary") -> dict:
     Returns:
         dict with status and details of the deleted event.
     """
-    service = _get_calendar_service()
+    service = _get_calendar_service(credentials)
 
     # Fetch event details before deleting for confirmation
     event = service.events().get(
@@ -179,6 +183,7 @@ def modify_event(
     end_time: str | None = None,
     description: str | None = None,
     calendar_id: str = "primary",
+    credentials=None,
 ) -> dict:
     """Modify an existing Google Calendar event. Only provided fields are updated.
 
@@ -194,7 +199,7 @@ def modify_event(
     Returns:
         dict with status and updated event details.
     """
-    service = _get_calendar_service()
+    service = _get_calendar_service(credentials)
     local_tz = datetime.now().astimezone().tzinfo
 
     patch_body = {}
@@ -274,13 +279,13 @@ def modify_event(
     }
 
 
-def list_calendars() -> dict:
+def list_calendars(credentials=None) -> dict:
     """List all calendars accessible to the user.
 
     Returns:
         dict with status and list of calendars with name and ID.
     """
-    service = _get_calendar_service()
+    service = _get_calendar_service(credentials)
 
     results = service.calendarList().list().execute()
 
@@ -288,7 +293,7 @@ def list_calendars() -> dict:
     for cal in results.get("items", []):
         calendars.append({
             "id": cal["id"],
-            "name": cal.get("summary", "Untitled"),
+            "name": cal.get("summaryOverride") or cal.get("summary", "Untitled"),
             "is_primary": cal.get("primary", False),
             "access_role": cal.get("accessRole", ""),
         })

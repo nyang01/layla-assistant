@@ -15,7 +15,10 @@ MAX_BODY_LENGTH = 500  # Truncate long emails for voice readability
 _gmail_service = None
 
 
-def _get_gmail_service():
+def _get_gmail_service(credentials=None):
+    """Build Gmail service. Uses provided credentials (multi-user) or legacy singleton."""
+    if credentials:
+        return build("gmail", "v1", credentials=credentials)
     global _gmail_service
     if _gmail_service is None:
         _gmail_service = build("gmail", "v1", credentials=get_credentials())
@@ -59,7 +62,7 @@ def _extract_body(payload: dict) -> str:
     return ""
 
 
-def read_emails(max_results: int = 10) -> dict:
+def read_emails(max_results: int = 10, credentials=None, user_id=None) -> dict:
     """Read recent emails from Gmail inbox (primary category only).
 
     Filters to primary inbox, excluding Promotions, Social, and Updates tabs.
@@ -70,7 +73,7 @@ def read_emails(max_results: int = 10) -> dict:
     Returns:
         dict with status and list of email summaries including full body text.
     """
-    service = _get_gmail_service()
+    service = _get_gmail_service(credentials)
 
     results = service.users().messages().list(
         userId="me",
@@ -139,7 +142,7 @@ def read_emails(max_results: int = 10) -> dict:
 
     # Update contacts in long-term memory
     try:
-        update_contacts_from_headers(from_headers)
+        update_contacts_from_headers(from_headers, user_id=user_id)
     except Exception:
         pass  # Don't fail email reading if memory update fails
 
@@ -151,6 +154,7 @@ def send_email(
     subject: str,
     body: str,
     reply_to_message_id: str | None = None,
+    credentials=None,
 ) -> dict:
     """Send an email via Gmail.
 
@@ -163,7 +167,7 @@ def send_email(
     Returns:
         dict with status and sent message ID.
     """
-    service = _get_gmail_service()
+    service = _get_gmail_service(credentials)
 
     message = MIMEText(body)
     message["to"] = to
@@ -208,7 +212,7 @@ def send_email(
     return {"status": "success", "message_id": sent["id"]}
 
 
-def search_emails(query: str, max_results: int = 10) -> dict:
+def search_emails(query: str, max_results: int = 10, credentials=None) -> dict:
     """Search Gmail using Gmail search syntax.
 
     Args:
@@ -218,7 +222,7 @@ def search_emails(query: str, max_results: int = 10) -> dict:
     Returns:
         dict with status and list of matching email summaries.
     """
-    service = _get_gmail_service()
+    service = _get_gmail_service(credentials)
 
     results = service.users().messages().list(
         userId="me",
@@ -268,7 +272,7 @@ def search_emails(query: str, max_results: int = 10) -> dict:
     return {"status": "success", "result_count": len(messages), "emails": messages}
 
 
-def get_full_email(message_id: str) -> dict:
+def get_full_email(message_id: str, credentials=None) -> dict:
     """Read the complete untruncated body of a specific email.
 
     Args:
@@ -277,7 +281,7 @@ def get_full_email(message_id: str) -> dict:
     Returns:
         dict with status and full email content (no body truncation).
     """
-    service = _get_gmail_service()
+    service = _get_gmail_service(credentials)
 
     msg = service.users().messages().get(
         userId="me",
@@ -299,7 +303,7 @@ def get_full_email(message_id: str) -> dict:
     }
 
 
-def archive_email(message_id: str) -> dict:
+def archive_email(message_id: str, credentials=None) -> dict:
     """Archive an email by removing it from the inbox.
 
     Args:
@@ -308,7 +312,7 @@ def archive_email(message_id: str) -> dict:
     Returns:
         dict with status and details of the archived email.
     """
-    service = _get_gmail_service()
+    service = _get_gmail_service(credentials)
 
     # Fetch subject for confirmation before archiving
     msg = service.users().messages().get(

@@ -24,7 +24,7 @@ class SessionManager:
 
         # Session expired — save last session timestamp to memory
         if session:
-            self._save_session_timestamp()
+            self._save_session_timestamp(user_id)
 
         # New or expired session
         self._sessions[user_id] = {
@@ -33,13 +33,13 @@ class SessionManager:
         }
         return self._sessions[user_id]["history"]
 
-    def _save_session_timestamp(self):
+    def _save_session_timestamp(self, user_id: str | None = None):
         """Save the current time as last_session_timestamp in memory."""
         try:
             from memory import load_memory, save_memory
-            memory = load_memory()
+            memory = load_memory(user_id)
             memory["last_session_timestamp"] = datetime.now().isoformat()
-            save_memory(memory)
+            save_memory(memory, user_id)
         except Exception:
             pass  # Don't break session flow if memory save fails
 

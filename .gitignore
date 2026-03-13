@@ -18,6 +18,9 @@ venv/
 # OS
 .DS_Store
 
+# Database
+layla.db
+
 # Deployment
 *.egg-info/
 dist/

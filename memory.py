@@ -35,31 +35,44 @@ JUNK_DOMAIN_PATTERNS = [
 ]
 
 
-def load_memory() -> dict:
-    """Load memory from disk. Returns default structure if file doesn't exist."""
+def load_memory(user_id: str | None = None) -> dict:
+    """Load memory from database (multi-user) or disk (legacy).
+
+    When user_id is provided, loads from database.
+    When None, falls back to file-based storage.
+    """
+    if user_id:
+        from database import get_user_memory
+        return get_user_memory(user_id)
+
     if MEMORY_FILE.exists():
         return json.loads(MEMORY_FILE.read_text())
     return {"user_email": "", "user_name": "", "contacts": {}, "facts": [], "last_session_timestamp": None}
 
 
-def save_memory(memory: dict) -> None:
-    """Save memory to disk."""
+def save_memory(memory: dict, user_id: str | None = None) -> None:
+    """Save memory to database (multi-user) or disk (legacy)."""
+    if user_id:
+        from database import save_user_memory
+        save_user_memory(user_id, memory)
+        return
+
     MEMORY_FILE.write_text(json.dumps(memory, indent=2, ensure_ascii=False))
 
 
-def save_fact(fact: str) -> dict:
+def save_fact(fact: str, user_id: str | None = None) -> dict:
     """Save a user fact/preference to long-term memory."""
-    memory = load_memory()
+    memory = load_memory(user_id)
     # Avoid duplicates
     if fact not in memory["facts"]:
         memory["facts"].append(fact)
-        save_memory(memory)
+        save_memory(memory, user_id)
     return {"status": "success", "fact": fact}
 
 
-def delete_fact(fact_keyword: str) -> dict:
+def delete_fact(fact_keyword: str, user_id: str | None = None) -> dict:
     """Delete a fact from long-term memory that matches the keyword."""
-    memory = load_memory()
+    memory = load_memory(user_id)
     keyword_lower = fact_keyword.lower()
     removed = []
     remaining = []
@@ -69,7 +82,7 @@ def delete_fact(fact_keyword: str) -> dict:
         else:
             remaining.append(fact)
     memory["facts"] = remaining
-    save_memory(memory)
+    save_memory(memory, user_id)
     return {"status": "success", "removed": removed, "remaining_count": len(remaining)}
 
 
@@ -100,23 +113,24 @@ def _is_junk_email(email: str) -> bool:
     return False
 
 
-def update_contacts_from_headers(from_headers: list[str]) -> None:
+def update_contacts_from_headers(from_headers: list[str], user_id: str | None = None) -> None:
     """Update contacts in memory from a list of From headers."""
-    memory = load_memory()
+    memory = load_memory(user_id)
     for header in from_headers:
         name, email = _parse_email_address(header)
         if not _is_junk_email(email) and name and email:
             memory["contacts"][name] = email
-    save_memory(memory)
+    save_memory(memory, user_id)
 
 
-def detect_user_email() -> str:
+def detect_user_email(user_id: str | None = None, credentials=None) -> str:
     """Fetch the authenticated user's Gmail address."""
-    memory = load_memory()
+    memory = load_memory(user_id)
     if memory["user_email"]:
         return memory["user_email"]
 
-    service = build("gmail", "v1", credentials=get_credentials())
+    creds = credentials or get_credentials()
+    service = build("gmail", "v1", credentials=creds)
     profile = service.users().getProfile(userId="me").execute()
     email = profile.get("emailAddress", "")
 
@@ -124,19 +138,20 @@ def detect_user_email() -> str:
     # Try to extract name from email
     if not memory["user_name"]:
         memory["user_name"] = email.split("@")[0].replace(".", " ").title()
-    save_memory(memory)
+    save_memory(memory, user_id)
     return email
 
 
-def bootstrap_contacts() -> dict:
+def bootstrap_contacts(user_id: str | None = None, credentials=None) -> dict:
     """Scan last 3 months of emails and build a frequent contacts list.
 
     Fetches headers only (lightweight), counts sender frequency,
     filters out junk, keeps top 20 personal contacts.
     """
-    memory = load_memory()
+    memory = load_memory(user_id)
 
-    service = build("gmail", "v1", credentials=get_credentials())
+    creds = credentials or get_credentials()
+    service = build("gmail", "v1", credentials=creds)
 
     # Search for emails from the last 3 months
     results = service.users().messages().list(
@@ -177,5 +192,5 @@ def bootstrap_contacts() -> dict:
     for name, _count in top_contacts:
         memory["contacts"][name] = sender_emails[name]
 
-    save_memory(memory)
+    save_memory(memory, user_id)
     return {"status": "success", "contacts_found": len(top_contacts)}

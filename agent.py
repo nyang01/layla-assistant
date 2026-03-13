@@ -1,5 +1,6 @@
 """Gemini-powered AI personal assistant with extensible tool calling."""
 
+import contextvars
 import json
 import os
 from datetime import datetime
@@ -12,10 +13,15 @@ from tools.gmail_tools import read_emails, send_email, search_emails, archive_em
 from tools.calendar_tools import read_calendar, create_event, delete_event, modify_event, list_calendars
 from memory import load_memory, save_fact, delete_fact
 
-def _build_system_prompt() -> str:
+# Context variables for multi-user credential/identity threading.
+# Set before each agent loop; read by tool wrapper functions.
+_current_credentials = contextvars.ContextVar('_current_credentials', default=None)
+_current_user_id = contextvars.ContextVar('_current_user_id', default=None)
+
+def _build_system_prompt(user_id: str | None = None) -> str:
     """Build the system prompt with the current date/time and long-term memory."""
     now = datetime.now()
-    memory = load_memory()
+    memory = load_memory(user_id)
 
     # Build memory context
     memory_lines = []
@@ -66,24 +72,23 @@ PERSONALITY:
 BEHAVIOR:
 - You are an AGENT. Take actions directly. Do not ask for confirmation unless
   the request is truly ambiguous.
+- NEVER archive, delete, or send emails unless the user EXPLICITLY asks you to.
+  "Read my emails" is NOT a request to archive. "Summarise" is NOT a request to
+  archive. Only archive when the user says "archive", "remove", or "clean up".
 - If a tool call fails, explain what went wrong in simple, non-technical terms.
 - Never expose technical details (API errors, JSON, IDs) to the user.
 - NEVER respond with just "..." or empty text. Always give a clear spoken response.
 - Proactively offer helpful follow-ups after completing actions.
-- SMART GREETING: When the user greets you (hi, hello, hey, good morning, etc.):
-  If this is the FIRST message in the conversation (no prior messages in history),
-  call read_emails AND read_calendar to silently check for updates.
-  Then compose your greeting following these STRICT rules:
-    1. ALWAYS start with "{time_greeting}, {name}!"
-    2. ONLY mention unread emails if is_unread is true for any email.
-    3. ONLY mention calendar if there are events today.
-    4. If ZERO unread emails AND ZERO events: your COMPLETE response must be
-       EXACTLY "{time_greeting}, {name}! What can I help with?" — nothing else.
-       NEVER say "no unread emails", "no events", "all clear", "nothing on
-       your calendar", or anything about the absence of updates.
-  If this is NOT the first message (conversation history exists),
-  do NOT call any tools. Just say "{time_greeting}, {name}! What can I
-  help with?"
+- GREETINGS are handled automatically before you see them. You will never
+  receive a bare greeting like "hi" or "hello" — those are handled by a
+  fast path. So NEVER respond with just a greeting. Always answer the
+  user's actual question or request.
+- AFTER GREETING — READING NEW EMAILS: When the greeting mentioned new emails
+  and the user then asks to "read them", "what are they", "summarise", or
+  otherwise references those new emails — use search_emails with query
+  "is:unread category:primary" (NOT read_emails). read_emails returns the
+  latest emails regardless of read status. search_emails with is:unread
+  returns exactly the unread emails the greeting reported.
 
 DATA FRESHNESS:
 - Tool results are LIVE from the API — always treat them as the current truth.
@@ -118,14 +123,17 @@ TOOL-SPECIFIC GUIDANCE:
 
 EMAIL:
 - CHOOSING THE RIGHT EMAIL TOOL:
-  * read_emails: Only for generic "read my emails" with no filters. Already
-    filtered to primary inbox (excludes Promotions/Social/Updates).
-  * search_emails: Whenever the user mentions any filter — time, sender, topic,
-    unread status, etc. Translate naturally to Gmail search syntax.
+  * read_emails: ONLY for "read my emails" or "check my inbox" with NO qualifiers
+    at all. If the user mentions ANY filter — time, sender, topic, unread, today,
+    this week, new — you MUST use search_emails instead.
+  * search_emails: Use this whenever the user mentions ANY qualifier. Examples:
+    - "emails today" → search_emails(query="newer_than:1d category:primary")
+    - "new emails" / "unread" → search_emails(query="is:unread category:primary")
+    - "emails from Sarah" → search_emails(query="from:sarah category:primary")
+    - "emails this week" → search_emails(query="newer_than:7d category:primary")
     You know Gmail operators: newer_than:, older_than:, from:, to:, subject:,
-    is:unread, has:attachment, after:, before:, category:, etc. Use your judgement.
-    IMPORTANT: Always include "category:primary" in search queries for general
-    email questions (e.g., "do I have new emails?", "any emails today?").
+    is:unread, has:attachment, after:, before:, category:, etc.
+    IMPORTANT: Always include "category:primary" in search queries.
     Only omit it when the user specifically asks about promotions, social, or
     all emails.
   * get_full_email: When the user wants to read the full content of a specific
@@ -152,9 +160,12 @@ CALENDAR:
 - When modifying a calendar event, first call read_calendar to find the event. Only
   provide the fields that are changing — duration is preserved automatically.
   "Move to 4pm" → only change start_time. Confirm what changed.
-- When the user mentions a specific calendar by name (work, personal, etc.), call
-  list_calendars first to find the matching calendar ID, then pass it to the relevant
-  calendar tool. When no specific calendar is mentioned, use "primary" (the default).
+- IMPORTANT — NAMED CALENDARS: When the user mentions ANY calendar by name (e.g.,
+  "school calendar", "work calendar", "personal"), you MUST call list_calendars FIRST
+  to find the correct calendar ID, THEN call read_calendar with that calendar_id.
+  NEVER guess the calendar ID. NEVER use "primary" when the user names a specific
+  calendar. The correct flow is: list_calendars → find matching ID → read_calendar.
+  When no specific calendar is mentioned, use "primary" (the default).
 - REMINDERS: If the user asks you to remind them about something, create a calendar
   event at that time instead. The phone's calendar notification will act as the reminder.
   Example: "Remind me to call Sarah at 3pm" → create event "Call Sarah" at 3pm.
@@ -172,7 +183,7 @@ def tool_read_emails(max_results: int = 10) -> dict:
     Args:
         max_results: Number of emails to return. Adjust based on the user's request. Default 10.
     """
-    return read_emails(max_results=max_results)
+    return read_emails(max_results=max_results, credentials=_current_credentials.get(), user_id=_current_user_id.get())
 
 
 def tool_send_email(to: str, subject: str, body: str, reply_to_message_id: str = "") -> dict:
@@ -189,6 +200,7 @@ def tool_send_email(to: str, subject: str, body: str, reply_to_message_id: str =
         subject=subject,
         body=body,
         reply_to_message_id=reply_to_message_id if reply_to_message_id else None,
+        credentials=_current_credentials.get(),
     )
 
 
@@ -201,7 +213,7 @@ def tool_search_emails(query: str, max_results: int = 10) -> dict:
         query: Gmail search query string. Examples: "from:sarah contract", "subject:invoice newer_than:7d".
         max_results: Maximum number of results to return. Default 10.
     """
-    return search_emails(query=query, max_results=max_results)
+    return search_emails(query=query, max_results=max_results, credentials=_current_credentials.get())
 
 
 def tool_archive_email(message_id: str) -> dict:
@@ -211,7 +223,7 @@ def tool_archive_email(message_id: str) -> dict:
     Args:
         message_id: The Gmail message ID to archive. Get this from previous email results in the conversation.
     """
-    return archive_email(message_id=message_id)
+    return archive_email(message_id=message_id, credentials=_current_credentials.get())
 
 
 def tool_get_full_email(message_id: str) -> dict:
@@ -222,7 +234,7 @@ def tool_get_full_email(message_id: str) -> dict:
     Args:
         message_id: The Gmail message ID to read in full. Get this from previous read_emails or search_emails results.
     """
-    return get_full_email(message_id=message_id)
+    return get_full_email(message_id=message_id, credentials=_current_credentials.get())
 
 
 def tool_read_calendar(date: str = "", calendar_id: str = "primary") -> dict:
@@ -232,7 +244,7 @@ def tool_read_calendar(date: str = "", calendar_id: str = "primary") -> dict:
         date: Date in YYYY-MM-DD format. If not specified, defaults to today.
         calendar_id: Calendar ID. Use "primary" for the main calendar, or a specific ID from list_calendars. Default "primary".
     """
-    return read_calendar(date=date if date else None, calendar_id=calendar_id)
+    return read_calendar(date=date if date else None, calendar_id=calendar_id, credentials=_current_credentials.get())
 
 
 def tool_create_event(summary: str, date: str, start_time: str, end_time: str = "", description: str = "", reminder_minutes: int = 10, calendar_id: str = "primary") -> dict:
@@ -255,6 +267,7 @@ def tool_create_event(summary: str, date: str, start_time: str, end_time: str = 
         description=description,
         reminder_minutes=reminder_minutes,
         calendar_id=calendar_id,
+        credentials=_current_credentials.get(),
     )
 
 
@@ -266,7 +279,7 @@ def tool_delete_event(event_id: str, calendar_id: str = "primary") -> dict:
         event_id: The Google Calendar event ID to delete. Get this from previous calendar results.
         calendar_id: Calendar ID. Default "primary".
     """
-    return delete_event(event_id=event_id, calendar_id=calendar_id)
+    return delete_event(event_id=event_id, calendar_id=calendar_id, credentials=_current_credentials.get())
 
 
 def tool_modify_event(event_id: str, summary: str = "", date: str = "", start_time: str = "", end_time: str = "", description: str = "", calendar_id: str = "primary") -> dict:
@@ -291,6 +304,7 @@ def tool_modify_event(event_id: str, summary: str = "", date: str = "", start_ti
         end_time=end_time if end_time else None,
         description=description if description else None,
         calendar_id=calendar_id,
+        credentials=_current_credentials.get(),
     )
 
 
@@ -299,7 +313,7 @@ def tool_list_calendars() -> dict:
     Use this when the user mentions a specific calendar by name (e.g., "work calendar", "personal calendar")
     to find the correct calendar ID.
     """
-    return list_calendars()
+    return list_calendars(credentials=_current_credentials.get())
 
 
 def tool_save_memory(fact: str) -> dict:
@@ -310,7 +324,7 @@ def tool_save_memory(fact: str) -> dict:
     Args:
         fact: A concise statement about the user to remember. Example: "Prefers morning meetings"
     """
-    return save_fact(fact)
+    return save_fact(fact, user_id=_current_user_id.get())
 
 
 def tool_delete_memory(fact_keyword: str) -> dict:
@@ -321,7 +335,7 @@ def tool_delete_memory(fact_keyword: str) -> dict:
     Args:
         fact_keyword: A keyword or phrase to match against stored facts. All facts containing this keyword will be removed.
     """
-    return delete_fact(fact_keyword)
+    return delete_fact(fact_keyword, user_id=_current_user_id.get())
 
 
 _web_search_client = None
@@ -407,14 +421,13 @@ def _is_greeting(message: str) -> bool:
     return clean in greetings
 
 
-def _fast_greeting(history: list) -> str:
+def _fast_greeting(history: list, user_id: str | None = None) -> str:
     """Handle greeting without calling Gemini — always returns a response.
 
     Fetches unread emails and today's events directly, builds a natural
     voice-friendly summary. No Gemini round-trip needed.
     """
-    from tools.gmail_tools import _get_gmail_service
-    from tools.calendar_tools import _get_calendar_service
+    from googleapiclient.discovery import build as build_service
 
     now = datetime.now()
     hour = now.hour
@@ -425,19 +438,25 @@ def _fast_greeting(history: list) -> str:
     else:
         greeting = "Good evening"
 
-    memory = load_memory()
+    memory = load_memory(user_id)
     name = memory.get("user_name", "").split()[0] or "there"
 
     # If there's already conversation history, skip the briefing
     if history:
         return f"{greeting}, {name}! What can I help with?"
 
+    # Get credentials for the current user
+    creds = _current_credentials.get()
+    if not creds:
+        from auth import get_credentials
+        creds = get_credentials()
+
     # First message — quick count of unread emails and upcoming events
     parts = [f"{greeting}, {name}!"]
 
     # Count NEW unread emails since last session (or last 24h if no previous session)
     try:
-        gmail = _get_gmail_service()
+        gmail = build_service("gmail", "v1", credentials=creds)
         last_ts = memory.get("last_session_timestamp")
         if last_ts:
             # Convert ISO timestamp to Gmail after: format (YYYY/MM/DD)
@@ -460,7 +479,7 @@ def _fast_greeting(history: list) -> str:
         local_tz = now.astimezone().tzinfo
         now_iso = now.replace(tzinfo=local_tz).isoformat()
         end_of_day = now.replace(hour=23, minute=59, second=59, tzinfo=local_tz).isoformat()
-        cal = _get_calendar_service()
+        cal = build_service("calendar", "v3", credentials=creds)
         events_result = cal.events().list(
             calendarId="primary",
             timeMin=now_iso,
@@ -556,23 +575,43 @@ def _compact_history(history: list):
     history.extend(recent)
 
 
-def process_message(user_message: str, history: list) -> str:
+def process_message(user_message: str, history: list, user_id: str | None = None) -> str:
     """Process a user message through the Gemini agent with tool calling.
 
     Args:
         user_message: The user's text input.
         history: Conversation history (list of Content objects).
+        user_id: Authenticated user ID (multi-user mode) or None (legacy).
 
     Returns:
         The agent's text response.
     """
+    # Set context variables for multi-user credential threading
+    if user_id:
+        from auth import get_credentials_for_user
+        _current_credentials.set(get_credentials_for_user(user_id))
+        _current_user_id.set(user_id)
+    else:
+        _current_credentials.set(None)
+        _current_user_id.set(None)
+
     # Fast path for greetings — handles everything without Gemini
     if _is_greeting(user_message):
-        return _fast_greeting(history)
+        greeting_reply = _fast_greeting(history, user_id=user_id)
+        # Add the greeting exchange to history so Gemini has context for follow-up messages
+        history.append(genai.protos.Content(
+            role="user",
+            parts=[genai.protos.Part(text=user_message)]
+        ))
+        history.append(genai.protos.Content(
+            role="model",
+            parts=[genai.protos.Part(text=greeting_reply)]
+        ))
+        return greeting_reply
 
     model = genai.GenerativeModel(
         model_name="gemini-2.5-flash-lite",
-        system_instruction=_build_system_prompt(),
+        system_instruction=_build_system_prompt(user_id),
         tools=TOOL_FUNCTIONS,
     )
 
@@ -637,13 +676,15 @@ def process_message(user_message: str, history: list) -> str:
 
     # Extract the final text response
     reply_parts = []
+    thought_text = ""
     for part in response.candidates[0].content.parts:
-        if hasattr(part, 'text') and part.text:
+        has_text = hasattr(part, 'text') and part.text
+        is_thought = hasattr(part, 'thought') and part.thought
+        print(f"  [Debug] Part: text={repr(part.text) if has_text else 'None'}, thought={is_thought}")
+        if has_text and not is_thought:
             reply_parts.append(part.text)
-        elif hasattr(part, 'thought') and part.thought:
-            pass  # Skip thinking/reasoning parts
-        else:
-            print(f"  [Debug] Unhandled part type: {type(part).__name__}, keys: {[f.name for f in type(part).meta.fields.values() if getattr(part, f.name, None)]}")
+        elif has_text and is_thought:
+            thought_text = part.text  # Save thought text as fallback
 
     reply = " ".join(reply_parts).strip() if reply_parts else ""
 
