@@ -28,7 +28,7 @@ genai.configure(api_key=api_key)
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/callback")
-GOOGLE_SCOPES = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar"
+GOOGLE_SCOPES = "openid email profile https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar"
 
 
 # --- Auth middleware ---
@@ -225,6 +225,9 @@ async def auth_callback(code: str):
         headers={"Authorization": f"Bearer {access_token}"},
     )
     userinfo = userinfo_response.json()
+    if userinfo_response.status_code != 200 or "id" not in userinfo:
+        print(f"[OAuth] Userinfo error: {userinfo}")
+        raise HTTPException(status_code=400, detail=f"Failed to get user info from Google: {userinfo.get('error', 'unknown error')}")
     google_id = userinfo["id"]
     email = userinfo.get("email", "")
     name = userinfo.get("name", "")
