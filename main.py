@@ -331,92 +331,231 @@ def _dashboard_html(token: str, name: str, server_url: str = "") -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Layla — Dashboard</title>
+<title>Layla — Setup Guide</title>
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
     min-height: 100vh;
     background: linear-gradient(135deg, #0d0d1a 0%, #1a1a2e 40%, #16213e 70%, #1a1035 100%);
-    display: flex; align-items: center; justify-content: center;
     font-family: -apple-system, 'Segoe UI', sans-serif; color: white;
+    padding: 40px 16px;
   }}
-  .card {{
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 24px; padding: 48px;
-    max-width: 620px; width: 90%;
-    backdrop-filter: blur(20px);
-  }}
-  .logo {{ font-size: 36px; font-weight: 700;
+  .container {{ max-width: 540px; margin: 0 auto; }}
+
+  /* Header */
+  .header {{ text-align: center; margin-bottom: 36px; }}
+  .logo {{ font-size: 42px; font-weight: 700;
     background: linear-gradient(135deg, #FF9A6C, #FF6B8A);
     -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
-  .welcome {{ font-size: 22px; margin: 12px 0 24px; color: rgba(255,255,255,0.8); }}
-  .section {{ margin-bottom: 24px; }}
-  .label {{ font-size: 13px; color: rgba(255,255,255,0.4); text-transform: uppercase;
-    letter-spacing: 1px; margin-bottom: 8px; }}
-  .token-box {{
-    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 12px; padding: 14px 16px; font-family: monospace;
-    font-size: 14px; word-break: break-all; color: #FF9A6C;
-    position: relative; cursor: pointer;
+  .welcome {{ font-size: 18px; margin-top: 8px; color: rgba(255,255,255,0.6); }}
+
+  /* Steps */
+  .step {{ display: flex; gap: 16px; margin-bottom: 28px; }}
+  .step-num {{
+    flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, #FF9A6C, #FF6B8A);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px; color: #0d0d1a; margin-top: 2px;
   }}
-  .token-box:hover {{ background: rgba(0,0,0,0.5); }}
-  .copied {{ position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-    color: #34A853; font-size: 13px; font-family: sans-serif; }}
-  .steps {{ color: rgba(255,255,255,0.5); font-size: 14px; line-height: 1.8; }}
-  .steps li {{ margin-bottom: 8px; }}
-  .steps code {{ background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px;
-    font-size: 13px; color: #FF9A6C; }}
-  .config-row {{ display: flex; gap: 8px; align-items: center; margin: 4px 0; }}
-  .config-label {{ color: rgba(255,255,255,0.35); font-size: 12px; min-width: 70px;
-    text-transform: uppercase; letter-spacing: 0.5px; }}
-  .config-value {{ background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 8px; padding: 8px 12px; font-family: monospace; font-size: 12px;
-    color: #FF9A6C; word-break: break-all; flex: 1; cursor: pointer; }}
-  .config-value:hover {{ background: rgba(0,0,0,0.5); }}
+  .step-num.done {{ background: #34A853; font-size: 16px; }}
+  .step-body {{ flex: 1; }}
+  .step-title {{ font-size: 17px; font-weight: 600; margin-bottom: 6px; color: rgba(255,255,255,0.9); }}
+  .step-desc {{ font-size: 14px; color: rgba(255,255,255,0.45); line-height: 1.6; }}
+  .step-desc strong {{ color: rgba(255,255,255,0.7); }}
+
+  /* Copyable value */
+  .copy-box {{
+    background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px; padding: 12px 14px; font-family: 'SF Mono', monospace;
+    font-size: 13px; word-break: break-all; color: #FF9A6C;
+    cursor: pointer; position: relative; margin: 8px 0;
+    transition: background 0.15s;
+  }}
+  .copy-box:hover {{ background: rgba(0,0,0,0.55); }}
+  .copy-box .hint {{ position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    font-family: sans-serif; font-size: 11px; color: rgba(255,255,255,0.25);
+    pointer-events: none; }}
+  .copy-box .hint.ok {{ color: #34A853; }}
+
+  /* Token box (larger) */
+  .token-box {{ font-size: 15px; padding: 14px 16px; letter-spacing: 0.3px; }}
+
+  /* Config rows */
+  .config {{ margin: 10px 0 4px; }}
+  .config-label {{ font-size: 11px; color: rgba(255,255,255,0.3); text-transform: uppercase;
+    letter-spacing: 0.8px; margin-bottom: 4px; }}
+
+  /* Download buttons */
+  .dl-btn {{
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 12px; padding: 14px 18px; text-decoration: none;
+    color: white; font-size: 15px; font-weight: 500;
+    margin: 8px 0; transition: all 0.15s;
+  }}
+  .dl-btn:hover {{ background: rgba(255,255,255,0.14); transform: translateY(-1px); }}
+  .dl-btn .icon {{ font-size: 22px; }}
+  .dl-btn .meta {{ flex: 1; }}
+  .dl-btn .dl-name {{ font-weight: 600; }}
+  .dl-btn .dl-desc {{ font-size: 12px; color: rgba(255,255,255,0.4); margin-top: 2px; }}
+  .dl-btn .arrow {{ color: rgba(255,255,255,0.3); font-size: 18px; }}
+
+  /* Sub-steps */
+  .sub-steps {{ margin: 10px 0 0; padding-left: 0; list-style: none; }}
+  .sub-steps li {{
+    font-size: 13px; color: rgba(255,255,255,0.45); line-height: 1.7;
+    padding: 3px 0 3px 20px; position: relative;
+  }}
+  .sub-steps li::before {{
+    content: ''; position: absolute; left: 4px; top: 10px;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(255,154,108,0.4);
+  }}
+  .sub-steps code {{
+    background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 4px;
+    font-size: 12px; color: #FF9A6C;
+  }}
+
+  /* Divider */
+  .divider {{ border: none; border-top: 1px solid rgba(255,255,255,0.06); margin: 32px 0; }}
+
+  /* Curl section */
+  .curl-toggle {{
+    font-size: 13px; color: rgba(255,255,255,0.3); cursor: pointer;
+    text-align: center; padding: 8px;
+  }}
+  .curl-toggle:hover {{ color: rgba(255,255,255,0.5); }}
+  .curl-content {{ display: none; margin-top: 8px; }}
+  .curl-content.show {{ display: block; }}
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="logo">Layla</div>
-  <div class="welcome">Welcome, {display_name}!</div>
+<div class="container">
 
-  <div class="section">
-    <div class="label">Your API Token</div>
-    <div class="token-box" onclick="navigator.clipboard.writeText('{token}'); let c=this.querySelector('.copied'); c.style.display='inline'; setTimeout(()=>c.style.display='none',2000)">
-      {token}<span class="copied" style="display:none">Copied!</span>
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">Layla</div>
+    <div class="welcome">Welcome, {display_name}! Follow the steps below to get started.</div>
+  </div>
+
+  <!-- Step 1: API Token -->
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <div class="step-title">Copy Your API Token</div>
+      <div class="step-desc">This is your personal token. Tap to copy it — you'll paste it into the shortcuts below.</div>
+      <div class="copy-box token-box" onclick="copyText(this, '{token}')">
+        {token}
+        <span class="hint">tap to copy</span>
+      </div>
     </div>
   </div>
 
-  <div class="section">
-    <div class="label">iOS Shortcut Setup</div>
-    <ol class="steps">
-      <li>Download the <strong>Layla</strong> iOS Shortcut (ask the developer for the link)</li>
-      <li>Find the <code>Get Contents of URL</code> action and set:
-        <div style="margin-top: 6px;">
-          <div class="config-row">
-            <span class="config-label">URL</span>
-            <div class="config-value" onclick="navigator.clipboard.writeText('{api_url}')">{api_url}</div>
-          </div>
-          <div class="config-row">
-            <span class="config-label">Header</span>
-            <div class="config-value" onclick="navigator.clipboard.writeText('Bearer {token}')">Authorization: Bearer {token}</div>
-          </div>
-        </div>
-      </li>
-      <li>That's it — say <strong>"Hi Layla"</strong> to start!</li>
-    </ol>
+  <!-- Step 2: Download Shortcuts -->
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <div class="step-title">Install the Shortcuts</div>
+      <div class="step-desc">Download both shortcuts to your iPhone. Open each link in Safari and tap <strong>Add Shortcut</strong>.</div>
+      <a class="dl-btn" href="https://www.icloud.com/shortcuts/d57fa0a81e7945498f10f074d1cbf3a3" target="_blank">
+        <span class="icon">&#9749;</span>
+        <span class="meta">
+          <span class="dl-name">Layla</span>
+          <span class="dl-desc">Main voice assistant — starts the conversation</span>
+        </span>
+        <span class="arrow">&#8250;</span>
+      </a>
+      <a class="dl-btn" href="https://www.icloud.com/shortcuts/71534523de9747c281c8cc6eb8276a5f" target="_blank">
+        <span class="icon">&#128172;</span>
+        <span class="meta">
+          <span class="dl-name">Layla Chat</span>
+          <span class="dl-desc">Conversation handler — keeps the dialogue going</span>
+        </span>
+        <span class="arrow">&#8250;</span>
+      </a>
+    </div>
   </div>
 
-  <div class="section">
-    <div class="label">API Usage (curl)</div>
-    <div class="token-box" style="font-size: 12px; cursor: pointer; color: rgba(255,255,255,0.6);" onclick="navigator.clipboard.writeText(this.innerText.replace('Copied!','').trim()); let c=this.querySelector('.copied'); c.style.display='inline'; setTimeout(()=>c.style.display='none',2000)">
-curl -X POST {api_url} \\
-  -H "Authorization: Bearer {token}" \\
-  -H "Content-Type: application/json" \\
-  -d '{{"message": "read my emails"}}'<span class="copied" style="display:none">Copied!</span>
+  <!-- Step 3: Configure -->
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <div class="step-title">Configure the Shortcuts</div>
+      <div class="step-desc">Open <strong>each</strong> shortcut in the Shortcuts app, tap the <strong>&#8943;</strong> menu to edit, and find the <code>Text</code> actions at the top. Replace the placeholder values:</div>
+      <div class="config">
+        <div class="config-label">Server URL</div>
+        <div class="copy-box" onclick="copyText(this, '{api_url}')">{api_url}<span class="hint">tap to copy</span></div>
+      </div>
+      <div class="config">
+        <div class="config-label">API Token</div>
+        <div class="copy-box" onclick="copyText(this, '{token}')">{token}<span class="hint">tap to copy</span></div>
+      </div>
+      <ul class="sub-steps">
+        <li>Open each shortcut and tap the <strong>&#8943;</strong> (three dots) to edit</li>
+        <li>Find the <code>Text</code> field containing the server URL — paste yours</li>
+        <li>Find the <code>Text</code> field containing the API token — paste yours</li>
+        <li>Tap <strong>Done</strong> to save</li>
+      </ul>
     </div>
+  </div>
+
+  <!-- Step 4: Vocal Shortcut -->
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <div class="step-title">Set Up "Hi Layla" Voice Trigger</div>
+      <div class="step-desc">This lets you start Layla hands-free — just say <strong>"Hi Layla"</strong> anytime.</div>
+      <ul class="sub-steps">
+        <li>Open <strong>Settings</strong> on your iPhone</li>
+        <li>Go to <strong>Accessibility</strong> &#8250; <strong>Vocal Shortcuts</strong></li>
+        <li>Enable <strong>Vocal Shortcuts</strong> toggle</li>
+        <li>Tap <strong>Add Action</strong></li>
+        <li>Choose <strong>Run Shortcut</strong>, then select <strong>Layla</strong></li>
+        <li>Set the custom phrase to <strong>"Hi Layla"</strong></li>
+        <li>Tap <strong>Save</strong></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Step 5: Done -->
+  <div class="step">
+    <div class="step-num done">&#10003;</div>
+    <div class="step-body">
+      <div class="step-title">You're All Set!</div>
+      <div class="step-desc">
+        Say <strong>"Hi Layla"</strong> to start a conversation. Layla can read your emails,
+        manage your calendar, search the web, and remember things for you.
+        Say <strong>"Goodbye"</strong> to end a session.
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- Developer API -->
+  <div class="curl-toggle" onclick="this.nextElementSibling.classList.toggle('show')">
+    Developer? Show API usage &#9662;
+  </div>
+  <div class="curl-content">
+    <div class="copy-box" style="font-size: 12px; color: rgba(255,255,255,0.5); white-space: pre; overflow-x: auto;" onclick="copyText(this, 'curl -X POST {api_url} -H &quot;Authorization: Bearer {token}&quot; -H &quot;Content-Type: application/json&quot; -d \\'{{\\'message\\': \\'read my emails\\'}}\\'' )">curl -X POST {api_url} \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{{"message": "read my emails"}}'<span class="hint">tap to copy</span></div>
   </div>
 </div>
+
+<script>
+function copyText(el, text) {{
+  navigator.clipboard.writeText(text).then(function() {{
+    var hint = el.querySelector('.hint');
+    hint.textContent = 'Copied!';
+    hint.classList.add('ok');
+    setTimeout(function() {{
+      hint.textContent = 'tap to copy';
+      hint.classList.remove('ok');
+    }}, 2000);
+  }});
+}}
+</script>
 </body>
 </html>"""
