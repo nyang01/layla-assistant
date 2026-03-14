@@ -262,7 +262,9 @@ async def auth_callback(code: str):
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(token: str, name: str = ""):
     """Show post-login page with API token and setup instructions."""
-    return HTMLResponse(_dashboard_html(token, name))
+    # Derive server URL from GOOGLE_REDIRECT_URI (strip /auth/callback)
+    server_url = GOOGLE_REDIRECT_URI.replace("/auth/callback", "")
+    return HTMLResponse(_dashboard_html(token, name, server_url))
 
 
 # --- HTML Templates ---
@@ -321,8 +323,9 @@ _LOGIN_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-def _dashboard_html(token: str, name: str) -> str:
+def _dashboard_html(token: str, name: str, server_url: str = "") -> str:
     display_name = name or "there"
+    api_url = f"{server_url}/api/chat" if server_url else "/api/chat"
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -341,7 +344,7 @@ def _dashboard_html(token: str, name: str) -> str:
     background: rgba(255,255,255,0.06);
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 24px; padding: 48px;
-    max-width: 560px; width: 90%;
+    max-width: 620px; width: 90%;
     backdrop-filter: blur(20px);
   }}
   .logo {{ font-size: 36px; font-weight: 700;
@@ -361,9 +364,16 @@ def _dashboard_html(token: str, name: str) -> str:
   .copied {{ position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
     color: #34A853; font-size: 13px; font-family: sans-serif; }}
   .steps {{ color: rgba(255,255,255,0.5); font-size: 14px; line-height: 1.8; }}
-  .steps li {{ margin-bottom: 4px; }}
+  .steps li {{ margin-bottom: 8px; }}
   .steps code {{ background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px;
     font-size: 13px; color: #FF9A6C; }}
+  .config-row {{ display: flex; gap: 8px; align-items: center; margin: 4px 0; }}
+  .config-label {{ color: rgba(255,255,255,0.35); font-size: 12px; min-width: 70px;
+    text-transform: uppercase; letter-spacing: 0.5px; }}
+  .config-value {{ background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px; padding: 8px 12px; font-family: monospace; font-size: 12px;
+    color: #FF9A6C; word-break: break-all; flex: 1; cursor: pointer; }}
+  .config-value:hover {{ background: rgba(0,0,0,0.5); }}
 </style>
 </head>
 <body>
@@ -373,7 +383,7 @@ def _dashboard_html(token: str, name: str) -> str:
 
   <div class="section">
     <div class="label">Your API Token</div>
-    <div class="token-box" onclick="navigator.clipboard.writeText(this.innerText.replace('Copied!','')); this.querySelector('.copied').style.display='inline'">
+    <div class="token-box" onclick="navigator.clipboard.writeText('{token}'); let c=this.querySelector('.copied'); c.style.display='inline'; setTimeout(()=>c.style.display='none',2000)">
       {token}<span class="copied" style="display:none">Copied!</span>
     </div>
   </div>
@@ -381,20 +391,30 @@ def _dashboard_html(token: str, name: str) -> str:
   <div class="section">
     <div class="label">iOS Shortcut Setup</div>
     <ol class="steps">
-      <li>Open your <strong>Layla</strong> iOS Shortcut</li>
-      <li>In the <code>Get Contents of URL</code> action, add a header:<br>
-        <code>Authorization: Bearer {token}</code></li>
+      <li>Download the <strong>Layla</strong> iOS Shortcut (ask the developer for the link)</li>
+      <li>Find the <code>Get Contents of URL</code> action and set:
+        <div style="margin-top: 6px;">
+          <div class="config-row">
+            <span class="config-label">URL</span>
+            <div class="config-value" onclick="navigator.clipboard.writeText('{api_url}')">{api_url}</div>
+          </div>
+          <div class="config-row">
+            <span class="config-label">Header</span>
+            <div class="config-value" onclick="navigator.clipboard.writeText('Bearer {token}')">Authorization: Bearer {token}</div>
+          </div>
+        </div>
+      </li>
       <li>That's it — say <strong>"Hi Layla"</strong> to start!</li>
     </ol>
   </div>
 
   <div class="section">
     <div class="label">API Usage (curl)</div>
-    <div class="token-box" style="font-size: 12px; cursor: default; color: rgba(255,255,255,0.6);">
-curl -X POST /api/chat \\
+    <div class="token-box" style="font-size: 12px; cursor: pointer; color: rgba(255,255,255,0.6);" onclick="navigator.clipboard.writeText(this.innerText.replace('Copied!','').trim()); let c=this.querySelector('.copied'); c.style.display='inline'; setTimeout(()=>c.style.display='none',2000)">
+curl -X POST {api_url} \\
   -H "Authorization: Bearer {token}" \\
   -H "Content-Type: application/json" \\
-  -d '{{"message": "read my emails"}}'
+  -d '{{"message": "read my emails"}}'<span class="copied" style="display:none">Copied!</span>
     </div>
   </div>
 </div>
